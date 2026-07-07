@@ -8,22 +8,28 @@ function App() {
   const [name, setName] = useState('');
   const [budget, setBudget] = useState('');
   const [loadingTraffic, setLoadingTraffic] = useState(false);
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
+    setError(null);
     try {
       const campRes = await fetch(`${API_BASE}/campaigns`);
-      const campData = await campRes.json();
-      setCampaigns(campData);
+      if (!campRes.ok) throw new Error(`Failed to load campaigns (${campRes.status})`);
+      setCampaigns(await campRes.json());
 
       const analyticRes = await fetch(`${API_BASE}/analytics`);
-      const analyticData = await analyticRes.json();
-      setAnalytics(analyticData);
+      if (!analyticRes.ok) throw new Error(`Failed to load analytics (${analyticRes.status})`);
+      setAnalytics(await analyticRes.json());
     } catch (err) {
-      console.error("Error communicating with Go backend backend:", err);
+      console.error('Error communicating with backend:', err);
+      setError('Could not reach the backend. Is the Go server running on :8080?');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -37,118 +43,145 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, budget: parseFloat(budget) }),
       });
-      if (res.ok) {
-        setName('');
-        setBudget('');
-        fetchData();
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Request failed (${res.status})`);
       }
+      setName('');
+      setBudget('');
+      fetchData();
     } catch (err) {
-      console.error(err);
+      setError(err.message);
     }
   };
 
-  // Simulated traffic tool to show "Scale and Ambiguity Mindset"
-  const simulateTraffic = async (campaignId) => {
+  // Generates test events against a campaign so the dashboard has data
+  // to show. This is sample-data generation for local development, not
+  // a load-testing or traffic-simulation tool.
+  const generateSampleEvents = async (campaignId) => {
     setLoadingTraffic(true);
-    // Simulate bulk streams of impressions and random clicks
-    for (let i = 0; i < 50; i++) {
-      const type = Math.random() > 0.85 ? 'click' : 'impression';
-      await fetch(`${API_BASE}/track?campaign_id=${campaignId}&type=${type}`, { method: 'POST' });
+    setError(null);
+    try {
+      for (let i = 0; i < 50; i++) {
+        const type = Math.random() > 0.85 ? 'click' : 'impression';
+        const res = await fetch(`${API_BASE}/track?campaign_id=${campaignId}&type=${type}`, { method: 'POST' });
+        if (res.status === 402) {
+          // Campaign budget exhausted mid-loop; stop early rather than
+          // hammering a paused campaign.
+          break;
+        }
+      }
+      await fetchData();
+    } catch (err) {
+      setError('Failed to generate sample events.');
+    } finally {
+      setLoadingTraffic(false);
     }
-    await fetchData();
-    setLoadingTraffic(false);
   };
 
   return (
-    <div class="min-h-screen p-8">
-      <header class="border-b border-slate-800 pb-6 mb-8 flex justify-between items-center">
+    <div className="min-h-screen p-8">
+      <header className="border-b border-slate-800 pb-6 mb-8 flex justify-between items-center">
         <div>
-          <h1 class="text-3xl font-extrabold tracking-tight text-white">AdTech Core Engineering Portal</h1>
-          <p class="text-sm text-slate-400 mt-1">High-throughput distribution matrix & live publisher metrics</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-white">Ad Campaign Dashboard</h1>
+          <p className="text-sm text-slate-400 mt-1">A small demo app: create campaigns, log events, view basic stats.</p>
         </div>
-        <div class="bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded text-emerald-400 text-xs font-mono">
-          Go Production Pipeline Online
+        <div className="bg-slate-500/10 border border-slate-500/20 px-3 py-1 rounded text-slate-400 text-xs font-mono">
+          Demo build
         </div>
       </header>
 
-      {/* Analytics Top Cards */}
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div class="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl">
-          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Aggregated Impressions</span>
-          <div class="text-3xl font-bold mt-2 text-indigo-400">{analytics.impressions.toLocaleString()}</div>
+      {error && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/30 text-red-300 text-sm px-4 py-3 rounded-lg">
+          {error}
         </div>
-        <div class="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl">
-          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">System Click Events</span>
-          <div class="text-3xl font-bold mt-2 text-sky-400">{analytics.clicks.toLocaleString()}</div>
-        </div>
-        <div class="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl">
-          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Average CTR</span>
-          <div class="text-3xl font-bold mt-2 text-amber-400">{analytics.ctr.toFixed(2)}%</div>
-        </div>
-        <div class="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl">
-          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Live Revenue Ledger</span>
-          <div class="text-3xl font-bold mt-2 text-emerald-400">${analytics.revenue.toFixed(2)}</div>
-        </div>
-      </div>
+      )}
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Creation Panel */}
-        <div class="bg-slate-800/30 border border-slate-800 p-6 rounded-xl h-fit">
-          <h2 class="text-xl font-bold mb-4 text-white">Deploy New Ad Space</h2>
-          <form onSubmit={handleCreateCampaign} class="space-y-4">
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Campaign Namespace</label>
-              <input type="text" value={name} onChange={e => setName(e.target.value)} class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="Q3 TopFunnel Brand Awareness" />
+      {isLoading ? (
+        <p className="text-slate-500 text-sm">Loading...</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div className="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Impressions</span>
+              <div className="text-3xl font-bold mt-2 text-indigo-400">{analytics.impressions.toLocaleString()}</div>
             </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Relational Safe Budget Limit ($)</label>
-              <input type="number" value={budget} onChange={e => setBudget(e.target.value)} class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="50000" />
+            <div className="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Clicks</span>
+              <div className="text-3xl font-bold mt-2 text-sky-400">{analytics.clicks.toLocaleString()}</div>
             </div>
-            <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded font-semibold transition-colors">
-              Provision Ledger Infrastructure
-            </button>
-          </form>
-        </div>
+            <div className="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">CTR</span>
+              <div className="text-3xl font-bold mt-2 text-amber-400">{analytics.ctr.toFixed(2)}%</div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Revenue (simulated)</span>
+              <div className="text-3xl font-bold mt-2 text-emerald-400">${analytics.revenue.toFixed(2)}</div>
+            </div>
+          </div>
 
-        {/* Live System Grid View */}
-        <div class="lg:col-span-2 bg-slate-800/30 border border-slate-800 p-6 rounded-xl">
-          <h2 class="text-xl font-bold mb-4 text-white">Active System Ad Inventories</h2>
-          {campaigns.length === 0 ? (
-            <p class="text-slate-500 text-sm italic">No campaigns allocated in database memory pool yet.</p>
-          ) : (
-            <div class="overflow-x-auto">
-              <table class="w-full text-left text-sm text-slate-300">
-                <thead class="bg-slate-900/50 text-xs uppercase text-slate-400 border-b border-slate-800">
-                  <tr>
-                    <th class="py-3 px-4">UID</th>
-                    <th class="py-3 px-4">Identifier</th>
-                    <th class="py-3 px-4">Threshold allocation</th>
-                    <th class="py-3 px-4">State</th>
-                    <th class="py-3 px-4 text-right">Synthetic Performance Stress</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-800/60">
-                  {campaigns.map((c) => (
-                    <tr key={c.id} class="hover:bg-slate-800/20 transition-colors">
-                      <td class="py-3 px-4 font-mono text-slate-500">#{c.id}</td>
-                      <td class="py-3 px-4 font-semibold text-white">{c.name}</td>
-                      <td class="py-3 px-4 font-mono text-slate-400">${parseFloat(c.budget).toLocaleString()}</td>
-                      <td class="py-3 px-4">
-                        <span class="px-2 py-0.5 rounded text-xs bg-emerald-500/10 text-emerald-400 font-mono">{c.status}</span>
-                      </td>
-                      <td class="py-3 px-4 text-right">
-                        <button disabled={loadingTraffic} onClick={() => simulateTraffic(c.id)} class="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded disabled:opacity-40 transition-all">
-                          {loadingTraffic ? 'Streaming...' : 'Inject 50 Live Requests'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="bg-slate-800/30 border border-slate-800 p-6 rounded-xl h-fit">
+              <h2 className="text-xl font-bold mb-4 text-white">New Campaign</h2>
+              <form onSubmit={handleCreateCampaign} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Name</label>
+                  <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="Q3 Brand Awareness" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Budget ($)</label>
+                  <input type="number" value={budget} onChange={e => setBudget(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="50000" />
+                </div>
+                <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded font-semibold transition-colors">
+                  Create Campaign
+                </button>
+              </form>
             </div>
-          )}
-        </div>
-      </div>
+
+            <div className="lg:col-span-2 bg-slate-800/30 border border-slate-800 p-6 rounded-xl">
+              <h2 className="text-xl font-bold mb-4 text-white">Campaigns</h2>
+              {campaigns.length === 0 ? (
+                <p className="text-slate-500 text-sm italic">No campaigns yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm text-slate-300">
+                    <thead className="bg-slate-900/50 text-xs uppercase text-slate-400 border-b border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">ID</th>
+                        <th className="py-3 px-4">Name</th>
+                        <th className="py-3 px-4">Budget</th>
+                        <th className="py-3 px-4">Spent</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Sample Data</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {campaigns.map((c) => (
+                        <tr key={c.id} className="hover:bg-slate-800/20 transition-colors">
+                          <td className="py-3 px-4 font-mono text-slate-500">#{c.id}</td>
+                          <td className="py-3 px-4 font-semibold text-white">{c.name}</td>
+                          <td className="py-3 px-4 font-mono text-slate-400">${parseFloat(c.budget).toLocaleString()}</td>
+                          <td className="py-3 px-4 font-mono text-slate-400">${parseFloat(c.spent || 0).toFixed(2)}</td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded text-xs font-mono ${c.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-600/20 text-slate-400'}`}>
+                              {c.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button disabled={loadingTraffic || c.status !== 'active'} onClick={() => generateSampleEvents(c.id)} className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded disabled:opacity-40 transition-all">
+                              {loadingTraffic ? 'Generating...' : 'Generate 50 events'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
